@@ -1,0 +1,16 @@
+{
+  "name": "vanilla-visio-app",
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.16.4",
+    "vite": "^2.7.0"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.4.0"
+  }
+}
