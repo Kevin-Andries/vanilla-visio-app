@@ -8,6 +8,7 @@ const remoteVideosBox = document.querySelector(".remote-videos-box");
 
 // State
 const roomId = "1";
+let q = [];
 let localMedia;
 let socket;
 let pc = [];
@@ -54,19 +55,26 @@ function initializeSocket() {
 	// When a client joined, we create an offer for him
 	socket.on("new-peer-joined", async (peerId) => {
 		console.log("socket peer joined");
-		createRTCConnection(peerId, "creates");
+		createRTCOffer(peerId);
 	});
 
 	// When a SDP is received, we create an answer
 	socket.on("sdp-offer", async (peerId, sdp) => {
 		console.log("sdp-offer received", sdp);
-		createRTCConnection(peerId, "answer", sdp);
+		createRTCAnswer(peerId, sdp);
 	});
 
 	socket.on("sdp-answer", (peerId, sdp) => {
 		console.log("sdp-answer received");
 		const remotePeer = pc.find((peer) => peer.id === peerId);
 		remotePeer.connection.setRemoteDescription(sdp);
+
+		remotePeer.isCallAnswered = true;
+
+		remotePeer.iceCandidates.forEach((candidate) => {
+			console.log("emit ice candidate");
+			socket.emit("ice-candidate", peerId, candidate);
+		});
 	});
 
 	socket.on("new-ice-candidate", (peerId, candidate) => {
@@ -80,105 +88,108 @@ function initializeSocket() {
 	});
 }
 
-/**
- * Function to set up a new peer connection
- */
-async function createRTCConnection(peerId, which, sdp) {
-	const newPeer = {
+function createPeer(peerId) {
+	console.log("CREATE PEER:", peerId);
+	const peer = {
+		isCallAnswered: false,
 		id: peerId,
 		connection: new RTCPeerConnection(RTCConfig),
 		stream: new MediaStream(),
+		iceCandidates: [],
 	};
+	pc.push(peer);
 
-	pc.push(newPeer);
+	return peer;
+}
 
-	console.log("CREATE-RTC-CONNECTION", which, sdp);
+function setTracks(peer) {
+	// give local tracks to remote peer
+	localMedia.getTracks().forEach((track) => {
+		console.log("SENDING MY TRACKS", track);
+		peer.connection.addTrack(track, localMedia);
+	});
 
-	if (which === "creates") {
-		// Give its tracks to remote peer
-		// if (this.state.localMedia) {
-		localMedia.getTracks().forEach((track) => {
-			console.log("sending my tracks", track);
-			newPeer.connection.addTrack(track, localMedia);
-		});
-		// }
-	}
-
-	if (which !== "creates") {
-		// Listen to ice candidate
-		newPeer.connection.onicecandidate = (e) => {
-			if (e.candidate) {
-				console.log("emit ice candidate");
-				socket.emit("ice-candidate", peerId, e.candidate);
-			}
-		};
-	}
-
-	// Listen to tracks
-	newPeer.connection.ontrack = (e) => {
+	// listen to tracks from remote peer
+	peer.connection.ontrack = (e) => {
 		console.log("RECEIVED TRACK", e);
-		console.log("SETTINGS REMOTE TRACKS", e.streams[0].getTracks());
 		e.streams[0].getTracks().forEach((track) => {
-			newPeer.stream.addTrack(track);
+			peer.stream.addTrack(track);
 		});
 	};
+}
 
-	newPeer.connection.onconnectionstatechange = () => {
-		const connectionState = newPeer.connection.connectionState;
+function handleHangup(peer) {
+	peer.connection.onconnectionstatechange = () => {
+		const connectionState = peer.connection.connectionState;
+
 		if (
 			connectionState === "closed" ||
 			connectionState === "disconnected"
 		) {
 			console.log("A USER LEFT THE ROOM");
 
-			// remove pc from pc list in state
-			pc = pc.filter((peer) => peer.id !== peerId);
+			// remove pc
+			const video = document.getElementById(peer.id);
+			video.remove();
+			pc = pc.filter((p) => p.id !== peer.id);
 		} else if (connectionState === "connected") {
 			console.log("CONNECTED TO PEER");
 		}
 	};
+}
 
-	if (which === "creates") {
-		console.log("creating...");
+async function createRTCOffer(peerId) {
+	const newPeer = createPeer(peerId);
+	setTracks(newPeer);
+	handleHangup(newPeer);
 
-		newPeer.connection.onnegotiationneeded = async () => {
-			// Creates offer and responds to other peer
-			const offer = await newPeer.connection.createOffer(peerConfig);
-			console.log("created...");
-			await newPeer.connection.setLocalDescription(offer);
+	newPeer.connection.onicecandidate = (e) => {
+		if (e.candidate) {
+			if (!newPeer.isCallAnswered) {
+				newPeer.iceCandidates.push(e.candidate);
+			} else {
+				console.log("emit ice candidate");
+				socket.emit("ice-candidate", peerId, candidate);
+			}
+		}
+	};
 
-			// Listen to ice candidate
-			newPeer.connection.onicecandidate = (e) => {
-				if (e.candidate) {
-					console.log("emit ice candidate");
-					socket.emit("ice-candidate", peerId, e.candidate);
-				}
-			};
+	const offer = await newPeer.connection.createOffer(peerConfig);
+	await newPeer.connection.setLocalDescription(offer);
 
-			console.log(offer); // 2x diff !!!
-			console.log("emit offer");
-			socket.emit("offer", peerId, offer);
-		};
-	} else if (which === "answer" && sdp) {
-		const sdpObj = sdp;
-		await newPeer.connection.setRemoteDescription(sdpObj);
+	console.log("emit offer");
+	socket.emit("offer", peerId, offer);
 
-		// if (this.state.localMedia) {
-		localMedia.getTracks().forEach((track) => {
-			console.log("sending my tracks", track);
-			newPeer.connection.addTrack(track, localMedia);
-		});
-		// }
+	createVideo(newPeer);
+}
 
-		const answer = await newPeer.connection.createAnswer(peerConfig);
-		await newPeer.connection.setLocalDescription(answer);
+async function createRTCAnswer(peerId, sdp) {
+	const newPeer = createPeer(peerId);
+	setTracks(newPeer);
+	handleHangup(newPeer);
 
-		socket.emit("answer", peerId, answer);
-		console.log("emit answer");
-	}
+	newPeer.connection.onicecandidate = (e) => {
+		if (e.candidate) {
+			console.log("emit ice candidate");
+			socket.emit("ice-candidate", peerId, e.candidate);
+		}
+	};
 
+	await newPeer.connection.setRemoteDescription(sdp);
+
+	const answer = await newPeer.connection.createAnswer(peerConfig);
+	await newPeer.connection.setLocalDescription(answer);
+
+	console.log("emit answer");
+	socket.emit("answer", peerId, answer);
+
+	createVideo(newPeer);
+}
+
+function createVideo(peer) {
 	const newVideo = document.createElement("video");
-	newVideo.srcObject = newPeer.stream;
+	newVideo.id = peer.id;
+	newVideo.srcObject = peer.stream;
 	newVideo.autoplay = true;
 	newVideo.playsInline = true;
 	remoteVideosBox.appendChild(newVideo);
