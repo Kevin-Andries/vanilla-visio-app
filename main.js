@@ -8,7 +8,6 @@ const remoteVideosBox = document.querySelector(".remote-videos-box");
 
 // State
 const roomId = "1";
-let q = [];
 let localMedia;
 let socket;
 let pc = [];
