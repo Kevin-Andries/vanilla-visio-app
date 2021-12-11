@@ -12,13 +12,16 @@ let q = [];
 let localMedia;
 let socket;
 let pc = [];
+
 const RTCConfig = {
 	iceServers: [
 		{
-			urls: [
-				"stun:stun1.l.google.com:19302",
-				"stun:stun2.l.google.com:19302",
-			],
+			urls: ["stun:stun1.l.google.com:19302"],
+		},
+		{
+			urls: "turn:numb.viagenie.ca:3478",
+			username: "kevin.andries@yahoo.fr",
+			credential: "azerty",
 		},
 	],
 	iceCandidatePoolSize: 10,
@@ -149,7 +152,7 @@ async function createRTCOffer(peerId) {
 				newPeer.iceCandidates.push(e.candidate);
 			} else {
 				console.log("emit ice candidate");
-				socket.emit("ice-candidate", peerId, candidate);
+				socket.emit("ice-candidate", peerId, e.candidate);
 			}
 		}
 	};
